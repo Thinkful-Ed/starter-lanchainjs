@@ -1,35 +1,62 @@
 import { ChatCohere } from "@langchain/cohere";
-import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables";
-import { StringOutputParser } from "@langchain/core/output_parsers";
+import { BufferMemory } from "langchain/memory";
+import { ChatPromptTemplate, MessagesPlaceholder, } from "@langchain/core/prompts";
+
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const model = new ChatCohere({apiKey: process.env.COHERE_API_KEY});
 
-const prompt1 = PromptTemplate.fromTemplate(
-  `You are a master chef. Give me a recipe for {food}.`
-);
-const prompt2 = PromptTemplate.fromTemplate(
-  `You are a translator. Translate the recipe to {language}.`
-);
-
-const chain = prompt1.pipe(model).pipe(new StringOutputParser());
-
-const combinedChain = RunnableSequence.from([
-  {
-    food: chain,
-    language: (input) => input.language,
-  },
-  prompt2,
-  model,
-  new StringOutputParser(),
+// Add history in ChatPromptTemplate
+const prompt = ChatPromptTemplate.fromMessages([
+  new MessagesPlaceholder("history"),
+  ["human", "{input}"],
 ]);
 
-const result = await combinedChain.invoke({
-  food: "Blueberry muffins",
-  language: "Spanish",
+// Define memory
+const memory = new BufferMemory({
+  returnMessages: true,
+  inputKey: "input",
+  outputKey: "output",
+  memoryKey: "history",
 });
 
-console.log(result);
+// Chat history starts empty: `{ history: [] }`
+// console.log(await memory.loadMemoryVariables({}));
+
+const chain = RunnableSequence.from([
+  {
+    input: (initialInput) => initialInput.input,
+    memory: () => memory.loadMemoryVariables({}),
+  },
+  {
+    input: (previousOutput) => previousOutput.input,
+    history: (previousOutput) => previousOutput.memory.history,
+  },
+  prompt,
+  model,
+]);
+
+const inputs = {
+  input: "Hey, I'm Robin! I am from Baja California!",
+};
+
+const response = await chain.invoke(inputs);
+
+console.log(response.content);
+
+await memory.saveContext(inputs, {
+  output: response.content,
+});
+
+//console.log(await memory.loadMemoryVariables({}));
+
+const inputs2 = {
+  input: "What's my name and where am I from?",
+};
+
+const response2 = await chain.invoke(inputs2);
+
+console.log(response2.content);
